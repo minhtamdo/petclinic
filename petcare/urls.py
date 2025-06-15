@@ -880,7 +880,128 @@ def staff_dashboard(request):
 
     return render(request, 'staff.html', context)
 
+def nutrition_view(request, pet_id):
+    plans = NutritionPlan.objects.filter(pet__id=pet_id).select_related('created_by')
+    data = [
+        {
+            "food_type": p.food_type,
+            "portion": p.portion,
+            "note": p.note,
+            "created_by": p.created_by.fullname,
+            "updated_at": p.updated_at.strftime("%Y-%m-%d %H:%M:%S")
+        }
+        for p in plans
+    ]
+    return JsonResponse({"nutrition_plans": data})
 
+def vaccination_view(request, pet_id):
+    histories = VaccinationHistory.objects.select_related('appointment__pet')\
+        .filter(appointment__pet_id=pet_id)
+
+    data = [
+        {
+            "vaccine_name": h.vaccine_name,
+            "vaccination_date": h.vaccination_date.isoformat(),
+            "next_due": h.next_due.isoformat(),
+            "total_doses": h.total_doses,
+            "batch_number": h.batch_number,
+            "is_completed": h.is_completed,
+            "note": h.note,
+        }
+        for h in histories
+    ]
+    return JsonResponse(data, safe=False)
+
+def service_view(request, pet_id):
+    appointments = Appointment.objects.filter(pet_id=pet_id)
+    beauty_services = BeautyServiceHistory.objects.filter(appointment__in=appointments).select_related('appointment')
+    hotel_services = HotelServiceHistory.objects.filter(appointment__in=appointments).select_related('appointment')
+
+    for item in beauty_services:
+        item.service_category = 'beauty'
+    for item in hotel_services:
+        item.service_category = 'hotel'
+
+    combined_services = sorted(
+        chain(beauty_services, hotel_services),
+        key=lambda x: x.appointment.check_in,
+        reverse=True
+    )
+
+    data = []
+    for service in combined_services:
+        base = {
+            "type": service.service_category,
+            "check_in": service.appointment.check_in.isoformat(),
+            "check_out": service.appointment.check_out.isoformat(),
+        }
+
+        if service.service_category == "beauty":
+            base.update({
+                "service_type": service.service_type,
+                "notes": service.notes
+            })
+        else:
+            base.update({
+                "room_type": service.room_type,
+                "room_number": service.room_number,
+                "special_needs": service.special_needs
+            })
+
+        data.append(base)
+
+    return JsonResponse(data, safe=False)
+
+def medical_view(request, pet_id):
+    records = MedicalHistory.objects.filter(appointment__pet_id=pet_id) \
+        .select_related('appointment') \
+        .order_by('-appointment__check_in')
+
+    data = [
+        {
+            "diagnosis": record.diagnosis,
+            "treatment": record.treatment,
+            "notes": record.notes,
+            "check_in": record.appointment.check_in.isoformat(),
+            "check_out": record.appointment.check_out.isoformat()
+        }
+        for record in records
+    ]
+
+    return JsonResponse(data, safe=False)
+
+def pet_species_stats(request):
+    data = (
+        Pet.objects
+        .values('species')
+        .annotate(count=Count('id'))
+        .order_by('-count')
+    )
+    stats = {item['species']: item['count'] for item in data}
+    return JsonResponse(stats)
+
+
+def calculate_monthly_revenue_view(request):
+    with connection.cursor() as cursor:
+        cursor.execute("""
+            SELECT
+                SUM(
+                    CASE 
+                        WHEN a.type = 'hotel' THEN s.price * GREATEST((a.check_out - a.check_in), 1)
+                        ELSE s.price
+                    END
+                ) AS total_revenue
+            FROM appointments a
+            JOIN services s ON a.type = s.type
+            WHERE a.status = 'completed'
+              AND EXTRACT(MONTH FROM a.check_in) = EXTRACT(MONTH FROM CURRENT_DATE)
+              AND EXTRACT(YEAR FROM a.check_in) = EXTRACT(YEAR FROM CURRENT_DATE);
+        """)
+        row = cursor.fetchone()
+    
+    total_revenue = row[0] if row[0] is not None else 0
+
+    return JsonResponse({'total_revenue': int(total_revenue)})
 
 @csrf_exempt  # Nếu dùng fetch() từ JS mà không kèm CSRF token
 def delete_appointment(request, appointment_id):
@@ -903,6 +1024,20 @@ urlpatterns = [
     path('logout/', logout_view, name='logout_view'),
     path('register/', register_page, name='register'),
     path('api/register/owner/', register_owner, name='register_owner'),
+    path('nutrition/<uuid:pet_id>/', nutrition_view, name='get_nutrition_plan'),
+    path('vaccinations/<uuid:pet_id>/', vaccination_view, name='get_vaccination_history'),
+    path('services/<uuid:pet_id>/', service_view, name='get_service_history'),
+    path('medical/<uuid:pet_id>/', medical_view, name='get_medical_history'),
+    path('appointment/<uuid:appointment_id>/update/', views.update_appointment_status, name='update_status'),
+    path('', redirect_to_login),
+    path('api/get-pets/', views.get_pets_by_owner_phone, name='get_pets_by_phone'),
+    path('api/get-users/', views.get_users_by_role, name='get_users_by_role'),
+    path('api/create-appointment/', views.create_appointment, name='create_appointment'),
+    path('api/services/', views.get_services, name='get_services'),
+    path('api/update-service-price/', views.update_service_price, name='update_service_price'),
+    path('api/monthly-revenue/', calculate_monthly_revenue_view, name='monthly-revenue'),
+    path('api/monthly-revenue-chart/', views.monthly_revenue_chart_data),
+    path('api/pet-species-stats/', pet_species_stats, name='pet_species_stats'),
     path('api/pets/', get_owner_pets, name='get_owner_pets'),
     path('api/appointments/create/', create_appointment, name='create_appointment'),
     path('account/info/', get_account_info, name='account-info'),
