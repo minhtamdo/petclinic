@@ -4,7 +4,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from .models import Appointment, Status
+from .models import Appointment, Pet, Status
 from .serializers import AppointmentSerializer, AppointmentUpdateSerializer
 
 @api_view(['POST'])
@@ -13,15 +13,8 @@ def approve_appointment(request, appointment_id):
     try:
         appointment = get_object_or_404(Appointment, id=appointment_id)
         
-        # Check if appointment is in pending status
-        if appointment.status != Status.PENDING.value:
-            return Response({
-                'error': 'Chỉ có thể chấp nhận lịch hẹn đang chờ duyệt',
-                'current_status': appointment.status
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
         # Update appointment
-        appointment.status = Status.APPROVED.value  # Assuming you have APPROVED status
+        appointment.status = Status.CONFIRMED.value  # Assuming you have APPROVED status
         appointment.approver = request.user
         appointment.updated_at = timezone.now()
         appointment.save()
@@ -45,15 +38,8 @@ def reject_appointment(request, appointment_id):
     try:
         appointment = get_object_or_404(Appointment, id=appointment_id)
         
-        # Check if appointment is in pending status
-        if appointment.status != Status.PENDING.value:
-            return Response({
-                'error': 'Chỉ có thể từ chối lịch hẹn đang chờ duyệt',
-                'current_status': appointment.status
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
         # Update appointment
-        appointment.status = Status.REJECTED.value  # Assuming you have REJECTED status
+        appointment.status = Status.CANCELLED.value  # Assuming you have REJECTED status
         appointment.approver = request.user
         appointment.updated_at = timezone.now()
         appointment.save()
@@ -70,6 +56,27 @@ def reject_appointment(request, appointment_id):
         return Response({
             'error': f'Có lỗi xảy ra: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def complete_appointment(request, appointment_id):
+    try:
+        appointment = get_object_or_404(Appointment, id=appointment_id)
+
+        appointment.status = Status.CONFIRMED.value  # Assuming you have REJECTED status
+        appointment.approver = request.user
+        appointment.updated_at = timezone.now()
+        appointment.save()
+
+        serializer = AppointmentSerializer(appointment)
+        return Response({
+            'message': 'Lịch hẹn đã được hoàn thành',
+            'appointment': serializer.data
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return Response({'error': f'Có lỗi xảy ra: {str(e)}'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -105,6 +112,6 @@ def pet_species_stats(request):
         .annotate(count=Count('id'))
         .order_by('-count')
     )
-    # Đưa về dict đơn giản: {'Chó': 12, 'Mèo': 7, ...}
     stats = {item['species']: item['count'] for item in data}
     return JsonResponse(stats)
+

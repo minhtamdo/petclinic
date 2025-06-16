@@ -2201,7 +2201,19 @@
                                 ❌ Từ chối
                             </button>
                         </div>
+                    ` : appointment.status === 'confirmed' ? `
+                        <div style="margin-top: 15px; display: flex; gap: 10px; justify-content: flex-end;">
+                            <button type="button" class="btn-complete" onclick="completeAppointment('${appointment.id}')"
+                                    style="padding: 8px 16px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
+                                ✅ Hoàn thành
+                            </button>
+                            <button type="button" class="btn-cancel" onclick="rejectAppointment('${appointment.id}')"
+                                    style="padding: 8px 16px; background: #ffc107; color: black; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
+                                ❌ Huỷ lịch
+                            </button>
+                        </div>
                     ` : ''}
+
                      
                     <div style="margin-top: 10px; font-size: 12px; color: #6c757d;"> 
                         Tạo: ${appointment.created_at} | Cập nhật: ${appointment.updated_at} 
@@ -2670,6 +2682,13 @@
             }
         }
 
+        function completeAppointment(appointmentId) {
+            if (confirm('Bạn có chắc chắn muốn đánh dấu lịch hẹn này là đã hoàn thành?')) {
+                updateAppointmentStatus(appointmentId, 'completed');
+                sendAppointmentStatusUpdate(appointmentId, 'completed');
+            }
+        }
+
         function getCSRFToken() {
             let cookieValue = null;
             const name = 'csrftoken';
@@ -2687,37 +2706,42 @@
         }
 
         function updateAppointmentStatus(appointmentId, newStatus) {
-            event.preventDefault()
             const appointmentElement = document.querySelector(`[ap-id="${appointmentId}"]`);
             if (appointmentElement) {
-                // Update the status attribute
                 appointmentElement.setAttribute('ap-status', newStatus);
-                
-                // Update the status display
+
+                // Cập nhật phần hiển thị trạng thái
                 const statusElement = appointmentElement.querySelector('.status');
                 if (statusElement) {
                     statusElement.className = `status ${getStatusClass(newStatus)}`;
                     statusElement.textContent = getStatusText(newStatus);
-                    
-                    // Set background color based on status
-                    if (newStatus == 'cancelled') {
-                        console.log(newStatus)
-                        statusElement.style.backgroundColor = '#dc3545'; // Red background
+
+                    // Set màu sắc tùy theo trạng thái
+                    if (newStatus === 'cancelled') {
+                        statusElement.style.backgroundColor = '#dc3545'; // Đỏ
+                        statusElement.style.color = 'white';
+                    } else if (newStatus === 'completed') {
+                        statusElement.style.backgroundColor = '#007bff'; // Xanh dương
                         statusElement.style.color = 'white';
                     } else {
-                        console.log(newStatus)
-                        statusElement.style.backgroundColor = '#28a745'; // Green background
+                        statusElement.style.backgroundColor = '#28a745'; // Xanh lá
                         statusElement.style.color = 'white';
                     }
                 }
-                
-                // Remove the action buttons
-                const buttonsContainer = appointmentElement.querySelector('.btn-approve, .btn-reject')?.parentElement;
-                if (buttonsContainer) {
-                    buttonsContainer.remove();
-                }
+
+                // Xóa tất cả các nút hành động (duyệt, từ chối, hoàn thành, huỷ)
+                const actionButtons = appointmentElement.querySelectorAll('.btn-approve, .btn-reject, .btn-complete, .btn-cancel');
+                actionButtons.forEach(btn => {
+                    const container = btn.parentElement;
+                    if (container && container.children.length <= 2) {
+                        container.remove();
+                    } else {
+                        btn.remove();
+                    }
+                });
             }
         }
+
         function fetchPetsByPhone() {
             const phone = document.getElementById('ownerPhone').value;
             if (!phone) return;
